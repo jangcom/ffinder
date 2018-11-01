@@ -1,0 +1,36 @@
+    NAME
+        ffinder - Files and dirs inspection assistant
+
+    SYNOPSIS
+        perl ffinder.pl [-s] [-r]
+
+    DESCRIPTION
+        This program utilizes the File::Find module of Perl 5
+        for inspecting and handling files and directories.
+
+    OPTIONS
+        -s
+            Obtain the size of the current working directory.
+        -r
+            Remove empty subdirectories from the current working
+            directory in an interactive fashion.
+
+    EXAMPLES
+        perl ffinder.pl -s
+        perl ffinder.pl -r
+
+    REQUIREMENTS
+        Perl 5, Perl File::Finder
+
+    SEE ALSO
+        perl(1)
+
+    AUTHOR
+        Jaewoong Jang <jang.comsci@gmail.com>
+
+    COPYRIGHT
+        Copyright (c) 2018 Jaewoong Jang
+
+    LICENSE
+        This software is available under the MIT license;
+        the license information is found in 'LICENSE'.
