@@ -2,7 +2,8 @@ NAME
     ffinder - Inspect files and directories
 
 SYNOPSIS
-        perl ffinder.pl [-dir=dname] [-s] [-r] [-nofm] [-nopause]
+        perl ffinder.pl [-dir=dname] [-report=fname] [-s] [-r]
+                        [-nofm] [-nopause]
 
 DESCRIPTION
     ffinder helps inspecting files and directories utilizing the File::Find
@@ -11,6 +12,9 @@ DESCRIPTION
 OPTIONS
         -dir=dname (default: current working directory)
             The directory of interest.
+
+        -report=fname (short form: -rpt, default: -dir appended by '_size.txt')
+            The name of directory size reporting file.
 
         -s
             Obtain the size of the directory of interest.

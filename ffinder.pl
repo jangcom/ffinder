@@ -14,8 +14,8 @@ use constant ARRAY  => ref [];
 use constant HASH   => ref {};
 
 
-our $VERSION = '1.01';
-our $LAST    = '2019-04-06';
+our $VERSION = '1.02';
+our $LAST    = '2019-04-07';
 our $FIRST   = '2018-08-15';
 
 
@@ -314,6 +314,12 @@ sub parse_argv {
             $run_opts_href->{dir} = $_;
         }
         
+        # Reporting file
+        if (/$cmd_opts{rpt}/i) {
+            s/$cmd_opts{rpt}//;
+            $run_opts_href->{rpt} = $_;
+        }
+        
         # Obtain the size of the directory of interest.
         if (/$cmd_opts{obtain_dir_size}/i) {
             $run_opts_href->{is_obtain_dir_size} = 1;
@@ -334,6 +340,11 @@ sub parse_argv {
             $run_opts_href->{is_nopause} = 1;
         }
     }
+    # Default reporting file
+    if (not $run_opts_href->{rpt}) {
+        $run_opts_href->{rpt} =
+            (split /\/|\\/, $run_opts_href->{dir})[-1].'_size.txt';
+    }
     
     return;
 }
@@ -342,7 +353,13 @@ sub parse_argv {
 sub obtain_dir_size {
     # """Obtain the size of the directory of interest in byte."""
     
-    my $dir = shift;
+    my(
+        $prog_info_href,
+        $run_opts_href,
+    ) = @_;
+    my $dir = $run_opts_href->{dir};
+    my $rpt = $run_opts_href->{rpt};
+    
     my %sizes = (
         b  => 0,
         kb => 0,
@@ -356,7 +373,7 @@ sub obtain_dir_size {
         return;
     }
     
-    # Calculate directory sizes.
+    # Calculate directory size in several byte units.
     find(sub { $sizes{b} += -s if -f }, $dir);
     $sizes{kb} = $sizes{b}  / 2**10;
     $sizes{mb} = $sizes{kb} / 2**10;
@@ -365,8 +382,6 @@ sub obtain_dir_size {
     # Fill in a buffer with the directory sizes.
     my(@strings, $k);
     my $lab = "Total size: ";
-    my %datetimes = construct_timestamps('-');
-    $strings[$k++] = $datetimes{ymdhms};
     $strings[$k++] = sprintf("Path:      [%s]", $dir);
     $strings[$k++] = sprintf("Directory: [%s]", (split /\/|\\/, $dir)[-1]);
     $strings[$k++] = "";
@@ -374,15 +389,30 @@ sub obtain_dir_size {
     $strings[$k++] = sprintf("%s%.2f KB", (' ' x length $lab), $sizes{kb});
     $strings[$k++] = sprintf("%s%.2f MB", (' ' x length $lab), $sizes{mb});
     $strings[$k++] = sprintf("%s%.2f GB", (' ' x length $lab), $sizes{gb});
-    $strings[$k++] = "";
-    $strings[$k++] = show_elapsed_real_time('copy');
     
-    # Print the sizes.
-    my $rpt_fname = basename($0, '.pl').'_dir_size.txt';
-    open my $rpt_fh, '>:encoding(UTF-8)', $rpt_fname;
-    say for @strings;
-    say $rpt_fh $_ for @strings;
+    # Reporting
+    open my $rpt_fh, '>:encoding(UTF-8)', $rpt;
+    my %tee_fhs = (
+        rpt => $rpt_fh,
+        scr => *STDOUT,
+    );
+    
+    # Front matter
+    my @fm = show_front_matter($prog_info_href, 'prog', 'auth', 'copy');
+    my %datetimes = construct_timestamps('-');
+    print $rpt_fh $_ for @fm;
+    print $rpt_fh "Obtained at [$datetimes{ymdhms}]\n\n";
+    
+    # Directory sizes
+    foreach my $fh (sort values %tee_fhs) {
+        say $fh $_ for @strings;
+    }
+    print $rpt_fh "\n".show_elapsed_real_time('copy')."\n";
     close $rpt_fh;
+    
+    # Notification
+    print "[$rpt] generated.\n";
+    show_elapsed_real_time();
     
     return;
 }
@@ -498,6 +528,7 @@ sub ffinder {
         );
         my %cmd_opts = ( # Command-line opts
             dir              => qr/-?-dir\s*=\s*/i,
+            rpt              => qr/-?-(?:report|rpt)\s*=\s*/i,
             obtain_dir_size  => qr/-?-s\b/i,
             rm_empty_subdirs => qr/-?-r\b/i,
             nofm             => qr/-?-nofm/i,
@@ -505,6 +536,7 @@ sub ffinder {
         );
         my %run_opts = ( # Program run opts
             dir                 => getcwd(),
+            rpt                 => '', # Default defined in parse_argv()
             is_obtain_dir_size  => 0,
             is_rm_empty_subdirs => 0,
             is_nofm             => 0,
@@ -520,8 +552,10 @@ sub ffinder {
             unless $run_opts{is_nofm};
         
         # Main
-        obtain_dir_size($run_opts{dir})  if $run_opts{is_obtain_dir_size};
-        rm_empty_subdirs($run_opts{dir}) if $run_opts{is_rm_empty_subdirs};
+        obtain_dir_size(\%prog_info, \%run_opts)
+            if $run_opts{is_obtain_dir_size};
+        rm_empty_subdirs($run_opts{dir})
+            if $run_opts{is_rm_empty_subdirs};
         
         # Notification - end
         pause_shell() unless $run_opts{is_nopause};
@@ -542,7 +576,8 @@ ffinder - Inspect files and directories
 
 =head1 SYNOPSIS
 
-    perl ffinder.pl [-dir=dname] [-s] [-r] [-nofm] [-nopause]
+    perl ffinder.pl [-dir=dname] [-report=fname] [-s] [-r]
+                    [-nofm] [-nopause]
 
 =head1 DESCRIPTION
 
@@ -552,6 +587,9 @@ ffinder helps inspecting files and directories utilizing the File::Find module.
 
     -dir=dname (default: current working directory)
         The directory of interest.
+
+    -report=fname (short form: -rpt, default: -dir appended by '_size.txt')
+        The name of directory size reporting file.
 
     -s
         Obtain the size of the directory of interest.
