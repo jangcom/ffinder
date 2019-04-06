@@ -1,254 +1,32 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
+use autodie;
 use utf8;
-use DateTime;
 use File::Find;
 use File::Basename qw(basename);
-use autodie        qw(open close);
-use feature        qw(say);
-use Cwd            qw(getcwd);
-use Carp           qw(croak);
-use constant ARRAY => ref [];
-use constant HASH  => ref {};
+use feature qw(say);
+use Cwd qw(getcwd);
+use Carp qw(croak);
+use DateTime;
+use constant SCALAR => ref \$0;
+use constant ARRAY  => ref [];
+use constant HASH   => ref {};
 
 
-#
-# Outermost lexicals
-#
-my %prog_info = (
-    titl        => basename($0, '.pl'),
-    expl        => "Files and dirs inspection assistant",
-    vers        => "v1.0.0",
-    date_last   => "2018-08-23",
-    date_first  => "2018-08-15",
-    opts        => { # Command-line options
-        size    => qr/-s\b/i,
-        subdirs => qr/-r\b/i,
-    },
-    auth        => {
-        name => 'Jaewoong Jang',
-        posi => 'PhD student',
-        affi => 'University of Tokyo',
-        mail => 'jang.comsci@gmail.com',
-    },
-    usage       => <<'    END_HEREDOC'
-    NAME
-        ffinder - Files and dirs inspection assistant
-
-    SYNOPSIS
-        perl ffinder.pl [-s] [-r]
-
-    DESCRIPTION
-        This program utilizes the File::Find module of Perl 5
-        for inspecting and handling files and directories.
-
-    OPTIONS
-        -s
-            Obtain the size of the current working directory.
-        -r
-            Remove empty subdirectories from the current working
-            directory in an interactive fashion.
-
-    EXAMPLES
-        perl ffinder.pl -s
-        perl ffinder.pl -r
-
-    REQUIREMENTS
-        Perl 5, Perl File::Finder
-
-    SEE ALSO
-        perl(1)
-
-    AUTHOR
-        Jaewoong Jang <jang.comsci@gmail.com>
-
-    COPYRIGHT
-        Copyright (c) 2018 Jaewoong Jang
-
-    LICENSE
-        This software is available under the MIT license;
-        the license information is found in 'LICENSE'.
-    END_HEREDOC
-);
-my %sizes = (
-    B  => 0,
-    KB => 0,
-    MB => 0,
-    GB => 0,
-);
-my $two_to_the_tenth = 2**10;
-my @garbage_can = ();
-my %subs = (
-    obtain_cwd_size  => {code_ref => \&obtain_cwd_size,  switch => 'off'},
-    rm_empty_subdirs => {code_ref => \&rm_empty_subdirs, switch => 'off'},
-);
+our $VERSION = '1.01';
+our $LAST    = '2019-04-06';
+our $FIRST   = '2018-08-15';
 
 
-#
-# Subroutine calls
-#
-if (@ARGV) {
-    show_front_matter(\%prog_info, 'prog', 'auth');
-    validate_argv(\%prog_info, \@ARGV);
-    parse_argv();
-}
-elsif (not @ARGV) {
-    show_front_matter(\%prog_info, 'usage');
-}
-pause_shell();
-
-
-#
-# Subroutine definitions
-#
-sub parse_argv {
-    my @_argv = @ARGV;
-    
-    foreach (@_argv) {
-        $subs{obtain_cwd_size}{switch}  = 'on' if /$prog_info{opts}{size}/;
-        $subs{rm_empty_subdirs}{switch} = 'on' if /$prog_info{opts}{subdirs}/;
-    }
-    
-    $subs{obtain_cwd_size}{code_ref}->()
-        if $subs{obtain_cwd_size}{switch} eq 'on';
-    $subs{rm_empty_subdirs}{code_ref}->()
-        if $subs{rm_empty_subdirs}{switch} eq 'on';
-}
-
-
-sub obtain_cwd_size {
-    # Obtain the size of the CWD in byte.
-    find(sub { $sizes{B} += -s if -f }, '.');
-    
-    # Convert the size wrto bigger units.
-    $sizes{KB} = $sizes{B}  / $two_to_the_tenth;
-    $sizes{MB} = $sizes{KB} / $two_to_the_tenth;
-    $sizes{GB} = $sizes{MB} / $two_to_the_tenth;
-    
-    # Fill in a buffer with the sizes.
-    my(@strings, $k);
-    my $lab = "Total size: ";
-    my %_datetimes = construct_timestamps('-');
-    $strings[$k++] = $_datetimes{ymdhms};
-    $strings[$k++] = sprintf("Path:      [%s]", getcwd());
-    $strings[$k++] = sprintf("Directory: [%s]", (split /\/|\\/, getcwd())[-1]);
-    $strings[$k++] = "";
-    $strings[$k++] = "$lab$sizes{B} B";
-    $strings[$k++] = sprintf("%s%.2f KB", (' ' x length($lab)), $sizes{KB});
-    $strings[$k++] = sprintf("%s%.2f MB", (' ' x length($lab)), $sizes{MB});
-    $strings[$k++] = sprintf("%s%.2f GB", (' ' x length($lab)), $sizes{GB});
-    $strings[$k++] = "";
-    $strings[$k++] = show_elapsed_real_time('copy');
-    
-    # Print the sizes.
-    my $rpt_fname = basename($0, '.pl').'_cwd_size.txt';
-    open my $rpt_fh, '>:encoding(UTF-8)', $rpt_fname;
-    
-    say for @strings;
-    say $rpt_fh $_ for @strings;
-    
-    close $rpt_fh;
-}
-
-
-sub rm_empty_subdirs {
-    printf("Collecting empty subdirectories from [%s]...\n", getcwd());
-    #
-    # Collect empty subdirectories of the CWD.
-    # Use finddepth(), which navigates directories bottom-up.
-    #
-    my $num_of_files;
-    finddepth(
-        sub {
-            if (-d) {
-                $num_of_files = grep $_, glob "$_/*";
-                
-                if ($num_of_files == 0) {
-                    push @garbage_can, $File::Find::name;
-                }
-            }
-        },
-        '.'
-    );
-    
-    #
-    # Ask whether to remove the collected empty subdirectories.
-    #
-    my $is_first_iter = 1;
-    my $notice        = "empty subdirectories found.";
-    if (@garbage_can) {
-        say "\n\u$notice\n";
-        my($yn_msg, $yn);
-        my $is_all_y = 0; # Make the user enter into (ii).
-        foreach (@garbage_can) {
-            # (i) All-y hook
-            # rmdir and move to the next iteration.
-            # No more entering into the STDIN while block.
-            if ($is_all_y == 1) {
-                rmdir;
-                say "[$_] removed.";
-                next if $_ ne $garbage_can[-1];
-            }
-            
-            # (ii) User-input taking
-            if ($is_all_y == 0) {
-                # Warn that the rmdir cannot be undone.
-                if ($is_first_iter == 1) {
-                    my $_caution = "* Caution: rmdir is not irrevocable! *";
-                    say "*" x length($_caution);
-                    say $_caution;
-                    say "*" x length($_caution);
-                    $is_first_iter = 0; # No more execution of this block.
-                }
-                
-                # STDIN while block
-                $yn_msg = "Remove [$_]? (y/n/all-y)> ";
-                print $yn_msg;
-                while ($yn = <STDIN>) {
-                    chomp($yn);
-                    # All-y
-                    if ($yn =~ /\ball-y\b/i) {
-                        rmdir;
-                        say "All remaining empty subdirs will be removed.";
-                        $is_all_y = 1; # Escape from the while block.
-                        last;
-                    }
-                    # y
-                    elsif ($yn =~ /\by\b/i) {
-                        rmdir;
-                        last;
-                    }
-                    # n
-                    elsif ($yn =~ /\bn\b/i) {
-                        last;
-                    }
-                    # Wrong input
-                    else {
-                        print $yn_msg;
-                    }
-                }
-            }
-        }
-        print "No more empty subdirectories. ";
-    }
-    say "\"NO\" $notice" if not @garbage_can;
-}
-
-
-#
-# Subroutines from My::Toolset
-#
+#----------------------------------My::Toolset----------------------------------
 sub show_front_matter {
-    my $hash_ref = shift; # Arg 1: To be %_prog_info
+    # """Display the front matter."""
+    my $sub_name = join('::', (caller(0))[0, 3]);
     
-    #
-    # Data type validation and deref: Arg 1
-    #
-    my $_sub_name = join('::', (caller(0))[0, 3]);
-    croak "The 1st arg to [$_sub_name] must be a hash ref!"
-        unless ref $hash_ref eq HASH;
-    my %_prog_info = %$hash_ref;
+    my $prog_info_href = shift;
+    croak "The 1st arg of [$sub_name] must be a hash ref!"
+        unless ref $prog_info_href eq HASH;
     
     # Subroutine optional arguments
     my(
@@ -277,7 +55,7 @@ sub show_front_matter {
     #
     # Fill in the front matter array.
     #
-    my @_fm;
+    my @fm;
     my $k = 0;
     my $border_len = $lead_symb ? 69 : 70;
     my %borders = (
@@ -287,79 +65,156 @@ sub show_front_matter {
     
     # Top rule
     if ($is_prog or $is_auth) {
-        $_fm[$k++] = $borders{'+'};
+        $fm[$k++] = $borders{'+'};
     }
     
     # Program info, except the usage
     if ($is_prog) {
-        $_fm[$k++] = sprintf(
-            "%s%s %s: %s%s",
+        $fm[$k++] = sprintf(
+            "%s%s - %s%s",
             ($lead_symb ? $lead_symb.' ' : $lead_symb),
-            $_prog_info{titl},
-            $_prog_info{vers},
-            $_prog_info{expl},
-            $newline
+            $prog_info_href->{titl},
+            $prog_info_href->{expl},
+            $newline,
         );
-        $_fm[$k++] = sprintf(
-            "%s%s%s%s",
+        $fm[$k++] = sprintf(
+            "%sVersion %s (%s)%s",
             ($lead_symb ? $lead_symb.' ' : $lead_symb),
-            'Last update:'.($is_timestamp ? '  ': ' '),
-            $_prog_info{date_last},
-            $newline
+            $prog_info_href->{vers},
+            $prog_info_href->{date_last},
+            $newline,
         );
     }
     
     # Timestamp
     if ($is_timestamp) {
-        my %_datetimes = construct_timestamps('-');
-        $_fm[$k++] = sprintf(
+        my %datetimes = construct_timestamps('-');
+        $fm[$k++] = sprintf(
             "%sCurrent time: %s%s",
             ($lead_symb ? $lead_symb.' ' : $lead_symb),
-            $_datetimes{ymdhms},
+            $datetimes{ymdhms},
             $newline
         );
     }
     
     # Author info
     if ($is_auth) {
-        $_fm[$k++] = $lead_symb.$newline if $is_prog;
-        $_fm[$k++] = sprintf(
+        $fm[$k++] = $lead_symb.$newline if $is_prog;
+        $fm[$k++] = sprintf(
             "%s%s%s",
             ($lead_symb ? $lead_symb.' ' : $lead_symb),
-            $_prog_info{auth}{$_},
+            $prog_info_href->{auth}{$_},
             $newline
         ) for qw(name posi affi mail);
     }
     
     # Bottom rule
     if ($is_prog or $is_auth) {
-        $_fm[$k++] = $borders{'+'};
+        $fm[$k++] = $borders{'+'};
     }
     
     # Program usage: Leading symbols are not used.
     if ($is_usage) {
-        $_fm[$k++] = $newline if $is_prog or $is_auth;
-        $_fm[$k++] = $_prog_info{usage};
+        $fm[$k++] = $newline if $is_prog or $is_auth;
+        $fm[$k++] = $prog_info_href->{usage};
     }
     
     # Feed a blank line at the end of the front matter.
     if (not $is_no_trailing_blkline) {
-        $_fm[$k++] = $newline;
+        $fm[$k++] = $newline;
     }
     
     #
     # Print the front matter.
     #
     if ($is_copy) {
-        return @_fm;
+        return @fm;
     }
-    elsif (not $is_copy) {
-        print for @_fm;
+    else {
+        print for @fm;
+        return;
     }
 }
 
 
+sub validate_argv {
+    # """Validate @ARGV against %cmd_opts."""
+    my $sub_name = join('::', (caller(0))[0, 3]);
+    
+    my $argv_aref     = shift;
+    my $cmd_opts_href = shift;
+    
+    croak "The 1st arg of [$sub_name] must be an array ref!"
+        unless ref $argv_aref eq ARRAY;
+    croak "The 2nd arg of [$sub_name] must be a hash ref!"
+        unless ref $cmd_opts_href eq HASH;
+    
+    # For yn prompts
+    my $the_prog = (caller(0))[1];
+    my $yn;
+    my $yn_msg = "    | Want to see the usage of $the_prog? [y/n]> ";
+    
+    #
+    # Terminate the program if the number of required arguments passed
+    # is not sufficient.
+    #
+    my $argv_req_num = shift; # (OPTIONAL) Number of required args
+    if (defined $argv_req_num) {
+        my $argv_req_num_passed = grep $_ !~ /-/, @$argv_aref;
+        if ($argv_req_num_passed < $argv_req_num) {
+            printf(
+                "\n    | You have input %s nondash args,".
+                " but we need %s nondash args.\n",
+                $argv_req_num_passed,
+                $argv_req_num,
+            );
+            print $yn_msg;
+            while ($yn = <STDIN>) {
+                system "perldoc $the_prog" if $yn =~ /\by\b/i;
+                exit if $yn =~ /\b[yn]\b/i;
+                print $yn_msg;
+            }
+        }
+    }
+    
+    #
+    # Count the number of correctly passed command-line options.
+    #
+    
+    # Non-fnames
+    my $num_corr_cmd_opts = 0;
+    foreach my $arg (@$argv_aref) {
+        foreach my $v (values %$cmd_opts_href) {
+            if ($arg =~ /$v/i) {
+                $num_corr_cmd_opts++;
+                next;
+            }
+        }
+    }
+    
+    # Fname-likes
+    my $num_corr_fnames = 0;
+    $num_corr_fnames = grep $_ !~ /^-/, @$argv_aref;
+    $num_corr_cmd_opts += $num_corr_fnames;
+    
+    # Warn if "no" correct command-line options have been passed.
+    if (not $num_corr_cmd_opts) {
+        print "\n    | None of the command-line options was correct.\n";
+        print $yn_msg;
+        while ($yn = <STDIN>) {
+            system "perldoc $the_prog" if $yn =~ /\by\b/i;
+            exit if $yn =~ /\b[yn]\b/i;
+            print $yn_msg;
+        }
+    }
+    
+    return;
+}
+
+
 sub show_elapsed_real_time {
+    # """Show the elapsed real time."""
+    
     my @opts = @_ if @_;
     
     # Parse optional arguments.
@@ -374,7 +229,7 @@ sub show_elapsed_real_time {
         }
     }
     my %dels = map { $_ => 1 } @del;
-    @opts    = grep !$dels{$_}, @opts;
+    @opts = grep !$dels{$_}, @opts;
     
     # Optional strings printing
     print for @opts;
@@ -383,113 +238,360 @@ sub show_elapsed_real_time {
     my $elapsed_real_time = sprintf("Elapsed real time: [%s s]", time - $^T);
     
     # Return values
-    say    $elapsed_real_time if not $is_return_copy;
-    return $elapsed_real_time if     $is_return_copy;
-}
-
-
-sub construct_timestamps {
-    # Optional setting for the date component separator
-    my $_date_sep  = '';
-    
-    # Terminate the program if the argument passed
-    # is not allowed to be a delimiter.
-    my @_delims = ('-', '_');
-    if ($_[0]) {
-        $_date_sep = $_[0];
-        my $is_correct_delim = grep $_date_sep eq $_, @_delims;
-        croak "The date delimiter must be one of: [".join(', ', @_delims)."]"
-            unless $is_correct_delim;
+    if ($is_return_copy) {
+        return $elapsed_real_time;
     }
-    
-    # Construct and return a datetime hash.
-    my $_dt  = DateTime->now(time_zone => 'local');
-    my $_ymd = $_dt->ymd($_date_sep);
-    my $_hms = $_dt->hms(($_date_sep ? ':' : ''));
-    (my $_hm = $_hms) =~ s/[0-9]{2}$//;
-    
-    my %_datetimes = (
-        none   => '', # Used for timestamp suppressing
-        ymd    => $_ymd,
-        hms    => $_hms,
-        hm     => $_hm,
-        ymdhms => sprintf("%s%s%s", $_ymd, ($_date_sep ? ' ' : '_'), $_hms),
-        ymdhm  => sprintf("%s%s%s", $_ymd, ($_date_sep ? ' ' : '_'), $_hm),
-    );
-    
-    return %_datetimes;
-}
-
-
-sub validate_argv {
-    my $hash_ref  = shift; # Arg 1: To be %_prog_info
-    my $array_ref = shift; # Arg 2: To be @_argv
-    my $num_of_req_argv;   # Arg 3: (Optional) Number of required args
-    $num_of_req_argv = shift if defined $_[0];
-    
-    #
-    # Data type validation and deref: Arg 1
-    #
-    my $_sub_name = join('::', (caller(0))[0, 3]);
-    croak "The 1st arg to [$_sub_name] must be a hash ref!"
-        unless ref $hash_ref eq HASH;
-    my %_prog_info = %$hash_ref;
-    
-    #
-    # Data type validation and deref: Arg 2
-    #
-    croak "The 2nd arg to [$_sub_name] must be an array ref!"
-        unless ref $array_ref eq ARRAY;
-    my @_argv = @$array_ref;
-    
-    #
-    # Terminate the program if the number of required arguments passed
-    # is not sufficient.
-    # (performed only when the 3rd optional argument is given)
-    #
-    if ($num_of_req_argv) {
-        my $num_of_req_argv_passed = grep $_ !~ /-/, @_argv;
-        if ($num_of_req_argv_passed < $num_of_req_argv) {
-            say $_prog_info{usage};
-            say "    | You have input $num_of_req_argv_passed required args,".
-                " but we need $num_of_req_argv.";
-            say "    | Please refer to the usage above.";
-            exit;
-        }
-    }
-    
-    #
-    # Count the number of correctly passed options.
-    #
-    
-    # Non-fnames
-    my $num_of_corr_opts = 0;
-    foreach my $arg (@_argv) {
-        foreach my $v (values %{$_prog_info{opts}}) {
-            if ($arg =~ /$v/i) {
-                $num_of_corr_opts++;
-                next;
-            }
-        }
-    }
-    
-    # Fname-likes
-    my $num_of_fnames = 0;
-    $num_of_fnames = grep $_ !~ /^-/, @_argv;
-    $num_of_corr_opts += $num_of_fnames;
-    
-    # Warn if "no" correct options have been passed.
-    if ($num_of_corr_opts == 0) {
-        say $_prog_info{usage};
-        say "    | None of the command-line options was correct.";
-        say "    | Please refer to the usage above.";
-        exit;
+    else {
+        say $elapsed_real_time;
+        return;
     }
 }
 
 
 sub pause_shell {
-    print "Press enter to exit...";
+    # """Pause the shell."""
+    
+    my $notif = $_[0] ? $_[0] : "Press enter to exit...";
+    
+    print $notif;
     while (<STDIN>) { last; }
+    
+    return;
 }
-#eof
+
+
+sub construct_timestamps {
+    # """Construct timestamps."""
+    
+    # Optional setting for the date component separator
+    my $date_sep  = '';
+    
+    # Terminate the program if the argument passed
+    # is not allowed to be a delimiter.
+    my @delims = ('-', '_');
+    if ($_[0]) {
+        $date_sep = $_[0];
+        my $is_correct_delim = grep $date_sep eq $_, @delims;
+        croak "The date delimiter must be one of: [".join(', ', @delims)."]"
+            unless $is_correct_delim;
+    }
+    
+    # Construct and return a datetime hash.
+    my $dt  = DateTime->now(time_zone => 'local');
+    my $ymd = $dt->ymd($date_sep);
+    my $hms = $dt->hms($date_sep ? ':' : '');
+    (my $hm = $hms) =~ s/[0-9]{2}$//;
+    
+    my %datetimes = (
+        none   => '', # Used for timestamp suppressing
+        ymd    => $ymd,
+        hms    => $hms,
+        hm     => $hm,
+        ymdhms => sprintf("%s%s%s", $ymd, ($date_sep ? ' ' : '_'), $hms),
+        ymdhm  => sprintf("%s%s%s", $ymd, ($date_sep ? ' ' : '_'), $hm),
+    );
+    
+    return %datetimes;
+}
+#-------------------------------------------------------------------------------
+
+
+sub parse_argv {
+    # """@ARGV parser"""
+    
+    my(
+        $argv_aref,
+        $cmd_opts_href,
+        $run_opts_href,
+    ) = @_;
+    my %cmd_opts = %$cmd_opts_href; # For regexes
+    
+    # Parser: Overwrite default run options if requested by the user.
+    foreach (@$argv_aref) {
+        # Directory of interest
+        if (/$cmd_opts{dir}/i) {
+            s/$cmd_opts{dir}//;
+            $run_opts_href->{dir} = $_;
+        }
+        
+        # Obtain the size of the directory of interest.
+        if (/$cmd_opts{obtain_dir_size}/i) {
+            $run_opts_href->{is_obtain_dir_size} = 1;
+        }
+        
+        # Find and remove empty subdirectories of the directory of interest.
+        if (/$cmd_opts{rm_empty_subdirs}/i) {
+            $run_opts_href->{is_rm_empty_subdirs} = 1;
+        }
+        
+        # The front matter won't be displayed at the beginning of the program.
+        if (/$cmd_opts{nofm}/) {
+            $run_opts_href->{is_nofm} = 1;
+        }
+        
+        # The shell won't be paused at the end of the program.
+        if (/$cmd_opts{nopause}/) {
+            $run_opts_href->{is_nopause} = 1;
+        }
+    }
+    
+    return;
+}
+
+
+sub obtain_dir_size {
+    # """Obtain the size of the directory of interest in byte."""
+    
+    my $dir = shift;
+    my %sizes = (
+        b  => 0,
+        kb => 0,
+        mb => 0,
+        gb => 0,
+    );
+    
+    # Notification
+    if (not -e $dir) {
+        say "Directory [$dir] not found.";
+        return;
+    }
+    
+    # Calculate directory sizes.
+    find(sub { $sizes{b} += -s if -f }, $dir);
+    $sizes{kb} = $sizes{b}  / 2**10;
+    $sizes{mb} = $sizes{kb} / 2**10;
+    $sizes{gb} = $sizes{mb} / 2**10;
+    
+    # Fill in a buffer with the directory sizes.
+    my(@strings, $k);
+    my $lab = "Total size: ";
+    my %datetimes = construct_timestamps('-');
+    $strings[$k++] = $datetimes{ymdhms};
+    $strings[$k++] = sprintf("Path:      [%s]", $dir);
+    $strings[$k++] = sprintf("Directory: [%s]", (split /\/|\\/, $dir)[-1]);
+    $strings[$k++] = "";
+    $strings[$k++] = "$lab$sizes{b} B";
+    $strings[$k++] = sprintf("%s%.2f KB", (' ' x length $lab), $sizes{kb});
+    $strings[$k++] = sprintf("%s%.2f MB", (' ' x length $lab), $sizes{mb});
+    $strings[$k++] = sprintf("%s%.2f GB", (' ' x length $lab), $sizes{gb});
+    $strings[$k++] = "";
+    $strings[$k++] = show_elapsed_real_time('copy');
+    
+    # Print the sizes.
+    my $rpt_fname = basename($0, '.pl').'_dir_size.txt';
+    open my $rpt_fh, '>:encoding(UTF-8)', $rpt_fname;
+    say for @strings;
+    say $rpt_fh $_ for @strings;
+    close $rpt_fh;
+    
+    return;
+}
+
+
+sub rm_empty_subdirs {
+    # """Find and remove empty subdirectories of the directory of interest."""
+    
+    my $dir = shift;
+    my @garbage_can = ();
+    
+    # Notification
+    if (not -e $dir) {
+        say "Directory [$dir] not found.";
+        return;
+    }
+    printf("Collecting empty subdirectories in [%s]...\n", $dir);
+    
+    # Collect empty subdirectories of the directory of interest
+    # using finddepth(), which navigates directories bottom-up.
+    my $num_of_files;
+    finddepth(
+        sub {
+            if (-d) {
+                $num_of_files = grep { $_ } glob "$_/*";
+                push @garbage_can, $File::Find::name if $num_of_files == 0;
+            }
+        },
+        $dir
+    );
+    
+    # Ask whether to remove the collected empty subdirectories.
+    my $is_first_iter = 1;
+    my $notice = "empty subdirector".($garbage_can[1] ? "ies" : "y")." found.";
+    if (@garbage_can) {
+        print "\n>>> \u$notice <<<\n\n";
+        my($yn_msg, $yn);
+        my $is_all_y = 0; # Guide the user to (ii).
+        foreach (@garbage_can) {
+            # (i) All-y hook
+            # rmdir and move to the next iteration.
+            # No more entering into the STDIN while block.
+            if ($is_all_y == 1) {
+                rmdir;
+                say "[$_] removed.";
+                next if $_ ne $garbage_can[-1];
+            }
+            
+            # (ii) User-input taking
+            if ($is_all_y == 0) {
+                # Warn that the rmdir cannot be undone.
+                if ($is_first_iter == 1) {
+                    my $caution = "* Caution: rmdir is not irrevocable! *";
+                    say "*" x length $caution;
+                    say $caution;
+                    say "*" x length $caution;
+                    $is_first_iter = 0; # No more execution of this block.
+                }
+                
+                # STDIN while block
+                $yn_msg = "Remove [$_]? (y/n/all-y)> ";
+                print $yn_msg;
+                while ($yn = <STDIN>) {
+                    chomp($yn);
+                    # All-y
+                    if ($yn =~ /\ball-y\b/i) {
+                        say "All remaining empty subdirs will be removed.";
+                        rmdir; # Remove the current empty subdir.
+                        say "[$_] removed.";
+                        $is_all_y = 1; # Escape from the while block.
+                        last;
+                    }
+                    # y
+                    elsif ($yn =~ /\by\b/i) {
+                        rmdir;
+                        last;
+                    }
+                    # n
+                    elsif ($yn =~ /\bn\b/i) {
+                        last;
+                    }
+                    # Wrong input
+                    else {
+                        print $yn_msg;
+                    }
+                }
+            }
+        }
+    }
+    
+    say "\"NO\" $notice" if not @garbage_can;
+    
+    return;
+}
+
+
+sub ffinder {
+    # ""ffinder main routine"
+    
+    if (@ARGV) {
+        my %prog_info = (
+            titl       => basename($0, '.pl'),
+            expl       => "Inspect files and directories",
+            vers       => $VERSION,
+            date_last  => $LAST,
+            date_first => $FIRST,
+            auth       => {
+                name => 'Jaewoong Jang',
+                posi => 'PhD student',
+                affi => 'University of Tokyo',
+                mail => 'jan9@korea.ac.kr',
+            },
+        );
+        my %cmd_opts = ( # Command-line opts
+            dir              => qr/-?-dir\s*=\s*/i,
+            obtain_dir_size  => qr/-?-s\b/i,
+            rm_empty_subdirs => qr/-?-r\b/i,
+            nofm             => qr/-?-nofm/i,
+            nopause          => qr/-?-nopause/i,
+        );
+        my %run_opts = ( # Program run opts
+            dir                 => getcwd(),
+            is_obtain_dir_size  => 0,
+            is_rm_empty_subdirs => 0,
+            is_nofm             => 0,
+            is_nopause          => 0,
+        );
+        
+        # ARGV validation and parsing
+        validate_argv(\@ARGV, \%cmd_opts);
+        parse_argv(\@ARGV, \%cmd_opts, \%run_opts);
+        
+        # Notification - beginning
+        show_front_matter(\%prog_info, 'prog', 'auth')
+            unless $run_opts{is_nofm};
+        
+        # Main
+        obtain_dir_size($run_opts{dir})  if $run_opts{is_obtain_dir_size};
+        rm_empty_subdirs($run_opts{dir}) if $run_opts{is_rm_empty_subdirs};
+        
+        # Notification - end
+        pause_shell() unless $run_opts{is_nopause};
+    }
+    
+    system("perldoc \"$0\"") if not @ARGV;
+    
+    return;
+}
+
+
+ffinder();
+__END__
+
+=head1 NAME
+
+ffinder - Inspect files and directories
+
+=head1 SYNOPSIS
+
+    perl ffinder.pl [-dir=dname] [-s] [-r] [-nofm] [-nopause]
+
+=head1 DESCRIPTION
+
+ffinder helps inspecting files and directories utilizing the File::Find module.
+
+=head1 OPTIONS
+
+    -dir=dname (default: current working directory)
+        The directory of interest.
+
+    -s
+        Obtain the size of the directory of interest.
+
+    -r
+        Find and remove empty subdirectories of the directory of interest.
+
+    -nofm
+        The front matter will not be displayed at the beginning of the program.
+
+    -nopause
+        The shell will not be paused at the end of the program.
+
+=head1 EXAMPLES
+
+    perl ffinder.pl -s
+    perl ffinder.pl -r
+    perl ffinder.pl -dir=./whatnot/ -s
+    perl ffinder.pl -dir=../reports/ -r
+
+=head1 REQUIREMENTS
+
+    Perl 5
+        File::Finder
+
+=head1 SEE ALSO
+
+L<ffinder on GitHub|https://github.com/jangcom/ffinder>
+
+=head1 AUTHOR
+
+Jaewoong Jang <jan9@korea.ac.kr>
+
+=head1 COPYRIGHT
+
+Copyright (c) 2018-2019 Jaewoong Jang
+
+=head1 LICENSE
+
+This software is available under the MIT license;
+the license information is found in 'LICENSE'.
+
+=cut

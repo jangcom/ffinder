@@ -1,36 +1,49 @@
-    NAME
-        ffinder - Files and dirs inspection assistant
+NAME
+    ffinder - Inspect files and directories
 
-    SYNOPSIS
-        perl ffinder.pl [-s] [-r]
+SYNOPSIS
+        perl ffinder.pl [-dir=dname] [-s] [-r] [-nofm] [-nopause]
 
-    DESCRIPTION
-        This program utilizes the File::Find module of Perl 5
-        for inspecting and handling files and directories.
+DESCRIPTION
+    ffinder helps inspecting files and directories utilizing the File::Find
+    module.
 
-    OPTIONS
+OPTIONS
+        -dir=dname (default: current working directory)
+            The directory of interest.
+
         -s
-            Obtain the size of the current working directory.
-        -r
-            Remove empty subdirectories from the current working
-            directory in an interactive fashion.
+            Obtain the size of the directory of interest.
 
-    EXAMPLES
+        -r
+            Find and remove empty subdirectories of the directory of interest.
+
+        -nofm
+            The front matter will not be displayed at the beginning of the program.
+
+        -nopause
+            The shell will not be paused at the end of the program.
+
+EXAMPLES
         perl ffinder.pl -s
         perl ffinder.pl -r
+        perl ffinder.pl -dir=./whatnot/ -s
+        perl ffinder.pl -dir=../reports/ -r
 
-    REQUIREMENTS
-        Perl 5, Perl File::Finder
+REQUIREMENTS
+        Perl 5
+            File::Finder
 
-    SEE ALSO
-        perl(1)
+SEE ALSO
+    ffinder on GitHub <https://github.com/jangcom/ffinder>
 
-    AUTHOR
-        Jaewoong Jang <jang.comsci@gmail.com>
+AUTHOR
+    Jaewoong Jang <jan9@korea.ac.kr>
 
-    COPYRIGHT
-        Copyright (c) 2018 Jaewoong Jang
+COPYRIGHT
+    Copyright (c) 2018-2019 Jaewoong Jang
 
-    LICENSE
-        This software is available under the MIT license;
-        the license information is found in 'LICENSE'.
+LICENSE
+    This software is available under the MIT license; the license
+    information is found in 'LICENSE'.
+
