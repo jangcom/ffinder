@@ -1,2 +1,2 @@
 # ffinder
-Files and dirs inspection assistant
+Inspect files and directories
