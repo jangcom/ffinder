@@ -1,0 +1,18 @@
+# github archive
+github/
+
+# ffinder records
+bak_ffinder.pl/
+ffinder_baker.bat
+
+# ffinder trial files
+ffinder_size.txt
+
+# MSWin link files
+*.lnk
+
+# POD-related
+ffinder_usage.bat
+ffinder.html
+pod2htmd.tmp
+ffinder_pod2html.bat

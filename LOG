@@ -1,3 +1,5 @@
+v1.03
+
 v1.02 (2019-04-07)
 > The name of directory size reporting file can now be specified
   via the command-line option.
